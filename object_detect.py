@@ -4,6 +4,7 @@ import os
 import tensorflow as tf
 import time
 import cv2
+import argparse
 
 from queue import Queue
 from threading import Thread
@@ -17,12 +18,13 @@ from object_detection.utils import visualization_utils as vis_util
 # Model names:
 # ssd_mobilenet_v1_coco_2017_11_17
 # ssd_inception_v2_coco_2017_11_17
+# faster_rcnn_inception_v2_coco_2017_11_08
 MODEL_NAME = 'ssd_mobilenet_v1_coco_2017_11_17'
 
 NUM_CLASSES = 90
 SCORE_TRESHOLD = 0.5
 
-THREAD_NUM = 1
+BOX_COLOR = (200, 50, 50)
 
 PATH_TO_CKPT = 'models/{}/frozen_inference_graph.pb'.format(MODEL_NAME)
 PATH_TO_LABELS = 'object_detection/data/{}'.format('mscoco_label_map.pbtxt')
@@ -30,7 +32,7 @@ PATH_TO_LABELS = 'object_detection/data/{}'.format('mscoco_label_map.pbtxt')
 
 class CameraStream:
 
-    def __init__(self, src=0, width=1280, height=720):
+    def __init__(self, src=0, width=640, height=360):
         self.cap = cv2.VideoCapture(src)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -121,7 +123,7 @@ class ObjectDetector:
         objects = []
         for index, value in enumerate(classes[0]):
             object_dict = {}
-            object_dict['class'] = (self.category_index.get(value)).get('name')
+            object_dict['class'] = self.category_index.get(value).get('name')
             object_dict['score'] = np.float64(scores[0, index])
             if object_dict['score'] > SCORE_TRESHOLD:
                 object_dict['xmin'] = np.float64(boxes[0, index, 0])
@@ -130,10 +132,10 @@ class ObjectDetector:
                 object_dict['ymax'] = np.float64(boxes[0, index, 3])
                 objects.append(object_dict)
 
-        return (image_np, objects, boxes, classes, scores)
+        return (objects, boxes, classes, scores)
 
 
-def main():
+def main(args):
 
     # Load model
     detection_graph = tf.Graph()
@@ -154,8 +156,10 @@ def main():
     input_queue = Queue(1)
     output_queue = Queue()
 
+    print(args)
+
     # Start things up
-    with CameraStream(src=0, width=480, height=360) as cam_stream:
+    with CameraStream(src=args.source, width=args.width, height=args.height) as cam_stream:
         with ObjectDetector(input_queue=input_queue, output_queue=output_queue, 
             detection_graph=detection_graph, category_index=category_index) as object_detector:
 
@@ -172,21 +176,18 @@ def main():
                 if not output_queue.empty():
 
                     # Get detection
-                    (image_np, objects, boxes, classes, scores) = output_queue.get()
+                    (objects, boxes, classes, scores) = output_queue.get()
 
-                    # Visualization
+                    # Draw frame
                     vis_util.visualize_boxes_and_labels_on_image_array(
-                        image_np,
+                        frame,
                         np.squeeze(boxes),
                         np.squeeze(classes).astype(np.int32),
                         np.squeeze(scores),
                         category_index,
                         use_normalized_coordinates=True,
                         line_thickness=8)
-                    cv2.imshow('object detection', image_np)
-
-                    # # Print results
-                    # print(objects)
+                    cv2.imshow('Object Detection', frame)
 
                     # Calculate framerate
                     current_time = time.time()
@@ -201,6 +202,17 @@ def main():
             
 
 if __name__ == '__main__':
-    main()
+
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-wi', '--width', dest='width', type=int,
+        default=640, help='width of frame')
+    parser.add_argument('-hi', '--height', dest='height', type=int,
+        default=360, help='height of frame')
+    parser.add_argument('-src', '--source', dest='source', type=int,
+        default=0, help='camera index')
+    args = parser.parse_args()
+
+    main(args=args)
 
 
